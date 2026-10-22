@@ -1,4 +1,5 @@
 import express from 'express';
+import { rawHeaderDiagnostic, type SignatureObservation, type HeaderSnapshot } from './services/webhook-raw-diagnostic.js';
 import helmet from 'helmet';
 import { fileURLToPath } from 'node:url';
 import { type Config, ready } from './config/env.js';
@@ -17,7 +18,7 @@ export function createApp(config:Config, deps:{store?:Store;gateway?:Gateway;log
   const app=express();const log=deps.log||logger;
   const service=new SupportService(config,deps.store||new MemoryStore(),deps.gateway||new MercadoPagoGateway(config.accessToken),log);
   app.disable('x-powered-by');app.set('trust proxy',config.trustProxyHops);app.set('query parser','simple');
-  app.use('/api/webhooks',webhookDiagnostics(log));
+  app.use('/api/webhooks',webhookDiagnostics(log,config.webhookRawDiagnostic));
   app.use(helmet({referrerPolicy:{policy:'no-referrer'},contentSecurityPolicy:{directives:{'default-src':["'self'"],'script-src':["'self'"],'style-src':["'self'"],'img-src':["'self'"],'connect-src':["'self'"],'object-src':["'none'"],'frame-ancestors':["'none'"],'form-action':["'self'"],'upgrade-insecure-requests':config.production?[]:null}}}));
   app.use((_req,res,next)=>{res.setHeader('Cache-Control','no-store');next();});
   app.get('/health',(_req,res)=>{res.json({status:'ok',service:'eventdeck-support-api'});});
@@ -27,7 +28,10 @@ export function createApp(config:Config, deps:{store?:Store;gateway?:Gateway;log
     requestLog('webhook_handler_entered');
     if(!config.webhookSecret || !config.accessToken) throw unavailable();
     const input=webhookInput(req.query,req.body);
-    const signature=inspectSignature(req.get('x-signature'),req.get('x-request-id'),input.dataId,config.webhookSecret,config.webhookProductionDiagnosticSecret);
+    let observed:SignatureObservation={};
+    const signature=inspectSignature(req.get('x-signature'),req.get('x-request-id'),input.dataId,config.webhookSecret,config.webhookProductionDiagnosticSecret,value=>{observed=value;});
+    requestLog('webhook_raw_header_diagnostic',rawHeaderDiagnostic(res.locals.webhookHeaderSnapshot as HeaderSnapshot,observed,config.webhookRawDiagnostic));
+    res.locals.webhookRawLogged=true;
     requestLog('webhook_signature_components',{...input.diagnostics,...signature.diagnostics});
     if(signature.dualDiagnostic) requestLog('webhook_dual_secret_diagnostic',{
       ...signature.dualDiagnostic,paymentId:input.queryIdValid?input.dataId:undefined,

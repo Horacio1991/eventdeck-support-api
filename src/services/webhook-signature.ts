@@ -1,5 +1,6 @@
+import type { SignatureObservation } from './webhook-raw-diagnostic.js';
 import { createHmac, timingSafeEqual } from 'node:crypto';
-export const SIGNATURE_FIX = 'webhook-hmac-dual-diagnostic';
+export const SIGNATURE_FIX = 'webhook-raw-header-diagnostic';
 export type SignatureDiagnostics = {
   timestampPresent:boolean; signatureVersionPresent:boolean; timestampLength:number;
   signatureLength:number; requestIdPresent:boolean; requestIdLength:number;
@@ -10,11 +11,12 @@ export type SignatureDiagnostics = {
 export function buildManifest(dataId:string|undefined,requestId:string|undefined,ts:string|undefined):string {
   return (dataId ? `id:${dataId};` : '') + (requestId ? `request-id:${requestId};` : '') + (ts ? `ts:${ts};` : '');
 }
-export function inspectSignature(signature:string|undefined,requestId:string|undefined,dataId:string|undefined,secret:string,productionDiagnosticSecret?:string):{valid:boolean;diagnostics:SignatureDiagnostics;dualDiagnostic?:{testSecretConfigured:boolean;productionSecretConfigured:boolean;testSecretMatch:boolean;productionSecretMatch:boolean|null;sameManifestUsed:boolean}} {
+export function inspectSignature(signature:string|undefined,requestId:string|undefined,dataId:string|undefined,secret:string,productionDiagnosticSecret?:string,observe?:(value:SignatureObservation)=>void):{valid:boolean;diagnostics:SignatureDiagnostics;dualDiagnostic?:{testSecretConfigured:boolean;productionSecretConfigured:boolean;testSecretMatch:boolean;productionSecretMatch:boolean|null;sameManifestUsed:boolean}} {
+  const observed:SignatureObservation={requestId,signature};
   const d:SignatureDiagnostics={timestampPresent:false,signatureVersionPresent:false,timestampLength:0,
     signatureLength:signature?.length||0,requestIdPresent:Boolean(requestId),requestIdLength:requestId?.length||0,
     manifestLength:0,manifestVariant:'not-built',signatureCheck:'UNTESTED'};
-  const fail=(code:string)=>{d.signatureCheck=code;return {valid:false,diagnostics:d};};
+  const fail=(code:string)=>{observe?.({...observed});d.signatureCheck=code;return {valid:false,diagnostics:d};};
   if(!signature)return fail('MISSING_SIGNATURE');
   if(signature.length>1024)return fail('SIGNATURE_TOO_LONG');
   const values=new Map<string,string>();
@@ -27,6 +29,7 @@ export function inspectSignature(signature:string|undefined,requestId:string|und
     values.set(match[1]!,match[2]!);
   }
   const ts=values.get('ts'),v1=values.get('v1');
+  observed.ts=ts;observed.v1=v1;
   d.timestampPresent=Boolean(ts);d.signatureVersionPresent=Boolean(v1);d.timestampLength=ts?.length||0;
   if(parseError)return fail(parseError);
   if(!secret)return fail('MISSING_SECRET');
@@ -44,6 +47,7 @@ export function inspectSignature(signature:string|undefined,requestId:string|und
   // Telemetría únicamente. NUNCA participa en valid ni en la autorización.
   const productionSecretMatch=productionDiagnosticSecret ? matches(productionDiagnosticSecret) : null;
   d.signatureCheck=valid?'MATCH':'HMAC_MISMATCH';
+  observe?.({...observed,manifest,compared:true});
   return {valid,diagnostics:d,dualDiagnostic:{testSecretConfigured:Boolean(secret),productionSecretConfigured:Boolean(productionDiagnosticSecret),testSecretMatch:valid,productionSecretMatch,sameManifestUsed:true}};
 }
 // Interfaz conservada para los tests anteriores. Sin fallback a body ni variantes de manifest.

@@ -1,11 +1,14 @@
+import { captureWebhookHeaders, rawHeaderDiagnostic } from '../services/webhook-raw-diagnostic.js';
 import { SIGNATURE_FIX } from '../services/webhook-signature.js';
 import { randomUUID } from 'node:crypto';
 import type { RequestHandler } from 'express';
 import type { Logger } from '../utils/logger.js';
 export const WEBHOOK_FIX = SIGNATURE_FIX;
 // Montar antes de Helmet, parser, rate limit y CORS. Nunca registrar URL/query completos.
-export function webhookDiagnostics(log:Logger):RequestHandler {
+export function webhookDiagnostics(log:Logger,rawEnabled=false):RequestHandler {
   return (req,res,next)=>{
+    const snapshot=captureWebhookHeaders(req);
+    res.locals.webhookHeaderSnapshot=snapshot;
     const traceId=randomUUID();
     const requestLog:Logger=(event,fields)=>log(event,{...fields,traceId});
     res.locals.webhookLog=requestLog;
@@ -27,6 +30,10 @@ export function webhookDiagnostics(log:Logger):RequestHandler {
       eventType:req.query.type==='payment'?'payment':req.query.type===undefined?'absent':'other',
       contentType:req.is('application/json')?'application/json':'other'
     });
+    // Si parser/limiter/configuración impiden llegar al validador, registrar captura sin manifest.
+    res.once('finish',()=>{if(!res.locals.webhookRawLogged){
+      requestLog('webhook_raw_header_diagnostic',rawHeaderDiagnostic(snapshot,{},rawEnabled));
+    }});
     res.once('finish',()=>requestLog(res.statusCode>=200 && res.statusCode<300?'webhook_acknowledged':'webhook_response_sent',{
       httpStatus:res.statusCode,durationMs:Date.now()-started
     }));
