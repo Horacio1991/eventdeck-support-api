@@ -60,12 +60,12 @@ test('FIX: first observable webhook log precedes JSON parser failure',async t=>{
  const r=await f.request('/api/webhooks/mercadopago?data.id=900&type=payment&secret=do-not-log',{method:'POST',headers:{'Content-Type':'application/json','x-signature':'do-not-log'},body:'{broken'});
  assert.equal(r.status,400);
  assert.equal(f.logs[0]?.event,'webhook_request_received');
- assert.equal(f.logs[0]?.fields?.code,'webhook-raw-header-diagnostic');
+ assert.equal(f.logs[0]?.fields?.code,'webhook-raw-url-diagnostic');
  assert(f.logs.some(l=>l.event==='webhook_response_sent'));
  assert(!f.logs.some(l=>l.event==='webhook_handler_entered'));
  assert.equal(f.gateway.calls,0);
  assert(!JSON.stringify(f.logs).includes('do-not-log'));
- assert.equal(r.headers.get('x-eventdeck-webhook-fix'),'webhook-raw-header-diagnostic');
+ assert.equal(r.headers.get('x-eventdeck-webhook-fix'),'webhook-raw-url-diagnostic');
  assert.match(r.headers.get('x-eventdeck-trace-id')!,/^[a-f0-9-]{36}$/);
 });
 test('FIX: signed JSON without Origin reaches exact POST route and logs ACK',async t=>{

@@ -2,12 +2,13 @@ import type { Request } from 'express';
 export type SignatureObservation = {requestId?:string;signature?:string;ts?:string;v1?:string;manifest?:string;compared?:boolean};
 type HeaderValue = string|string[]|undefined;
 export type HeaderSnapshot = {
+  rawRequestUrl?:string; mountedRequestUrl?:string;
   requestIds:readonly string[]; signatures:readonly string[];
   nodeRequestId:HeaderValue;nodeSignature:HeaderValue;
   expressRequestId:string|undefined;expressSignature:string|undefined;
 };
 // Se copian SOLO los dos headers autorizados antes de traceId/otros middleware.
-export function captureWebhookHeaders(req:Pick<Request,'rawHeaders'|'headers'|'get'>):HeaderSnapshot {
+export function captureWebhookHeaders(req:Pick<Request,'rawHeaders'|'headers'|'get'> & Partial<Pick<Request,'originalUrl'|'url'>>):HeaderSnapshot {
   const ids:string[]=[],signatures:string[]=[];
   for(let i=0;i<req.rawHeaders.length;i+=2){
     const name=req.rawHeaders[i]!.toLowerCase(),value=req.rawHeaders[i+1];
@@ -16,7 +17,8 @@ export function captureWebhookHeaders(req:Pick<Request,'rawHeaders'|'headers'|'g
     if(name==='x-signature')signatures.push(value);
   }
   const copy=(v:HeaderValue)=>Array.isArray(v)?[...v]:v;
-  return Object.freeze({requestIds:Object.freeze(ids),signatures:Object.freeze(signatures),
+  // Express conserva originalUrl antes de recortar el prefijo del middleware montado.
+  return Object.freeze({rawRequestUrl:req.originalUrl,mountedRequestUrl:req.url,requestIds:Object.freeze(ids),signatures:Object.freeze(signatures),
     nodeRequestId:copy(req.headers['x-request-id']),nodeSignature:copy(req.headers['x-signature']),
     expressRequestId:req.get('x-request-id'),expressSignature:req.get('x-signature')});
 }
@@ -35,6 +37,8 @@ export function rawHeaderDiagnostic(snapshot:HeaderSnapshot,used:SignatureObserv
   const comparedV1=used.compared?used.v1:undefined;
   return {
     rawDiagnosticEnabled:enabled,
+    rawRequestUrlLength:len(snapshot.rawRequestUrl),mountedRequestUrlLength:len(snapshot.mountedRequestUrl),
+    rawUrlEqualsMounted:snapshot.rawRequestUrl!==undefined && snapshot.mountedRequestUrl!==undefined?snapshot.rawRequestUrl===snapshot.mountedRequestUrl:null,
     rawRequestIdCount:ids.length,rawRequestIdLengths:ids.map(v=>v.length),
     expressRequestIdLength:len(snapshot.expressRequestId),manifestRequestIdLength:len(manifestId),
     rawEqualsExpress:oneEquals(ids,snapshot.expressRequestId),rawEqualsManifest:oneEquals(ids,manifestId),
@@ -62,14 +66,16 @@ export function rawHeaderDiagnostic(snapshot:HeaderSnapshot,used:SignatureObserv
     rawV1EqualsComparedV1:oneEquals(v1,comparedV1),
     rawV1HasUnexpectedCharacters:v1.some(v=>!/^[a-fA-F0-9]{64}$/.test(v)),
     manifestBuilt:used.manifest!==undefined,signatureCompared:used.compared===true,
-    // Solo estas tres propiedades contienen valores originales y requieren opt-in.
-    ...(enabled?{rawRequestIdValues:[...ids],rawSignatureValues:[...sigs],manifestExact:used.manifest??null}:{})
+    // Valores exactos autorizados solo con opt-in; no reconstruir ni parsear la URL.
+    ...(enabled?{rawRequestIdValues:[...ids],rawSignatureValues:[...sigs],manifestExact:used.manifest??null,
+      ...(snapshot.rawRequestUrl!==undefined?{rawRequestUrl:snapshot.rawRequestUrl}:{}),
+      ...(snapshot.mountedRequestUrl!==undefined?{mountedRequestUrl:snapshot.mountedRequestUrl}:{})}:{})
   };
 }
 export type RawHeaderLogFields = Partial<ReturnType<typeof rawHeaderDiagnostic>>;
 // Whitelist explícita. No aceptar objetos request/snapshots/secret en el logger.
 export const RAW_SAFE_KEYS = [
- 'rawDiagnosticEnabled','rawRequestIdCount','rawRequestIdLengths','expressRequestIdLength','manifestRequestIdLength',
+ 'rawRequestUrlLength','mountedRequestUrlLength','rawUrlEqualsMounted','rawDiagnosticEnabled','rawRequestIdCount','rawRequestIdLengths','expressRequestIdLength','manifestRequestIdLength',
  'rawEqualsExpress','rawEqualsManifest','nodeRequestIdEqualsExpress','nodeRequestIdIsArray','requestIdCombined',
  'requestIdHasLeadingWhitespace','requestIdHasTrailingWhitespace','requestIdContainsComma','expressRequestIdContainsComma',
  'validatorSignatureLength','expressSignatureEqualsValidator','expressRequestIdEqualsValidator','rawSignatureCount','rawSignatureLengths','expressSignatureLength','rawSignatureEqualsExpress',
@@ -81,6 +87,6 @@ export function selectRawLogFields(event:string,fields:RawHeaderLogFields):RawHe
   if(event!=='webhook_raw_header_diagnostic')return {};
   const safe=Object.fromEntries(RAW_SAFE_KEYS.map(k=>[k,fields[k]]));
   return {...safe,...(fields.rawDiagnosticEnabled===true?{
-    rawRequestIdValues:fields.rawRequestIdValues,rawSignatureValues:fields.rawSignatureValues,manifestExact:fields.manifestExact
+    rawRequestIdValues:fields.rawRequestIdValues,rawSignatureValues:fields.rawSignatureValues,manifestExact:fields.manifestExact,rawRequestUrl:fields.rawRequestUrl,mountedRequestUrl:fields.mountedRequestUrl
   }:{})};
 }

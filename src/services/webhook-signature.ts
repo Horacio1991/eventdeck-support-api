@@ -1,6 +1,6 @@
 import type { SignatureObservation } from './webhook-raw-diagnostic.js';
 import { createHmac, timingSafeEqual } from 'node:crypto';
-export const SIGNATURE_FIX = 'webhook-raw-header-diagnostic';
+export const SIGNATURE_FIX = 'webhook-raw-url-diagnostic';
 export type SignatureDiagnostics = {
   timestampPresent:boolean; signatureVersionPresent:boolean; timestampLength:number;
   signatureLength:number; requestIdPresent:boolean; requestIdLength:number;
