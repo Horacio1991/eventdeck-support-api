@@ -4,7 +4,7 @@ import { createHmac, randomBytes } from 'node:crypto';
 import { createApp } from '../src/app.js';
 import { loadConfig, cents } from '../src/config/env.js';
 import { MemoryStore } from '../src/services/store.js';
-import { MercadoPagoGateway, type Gateway, type Payment } from '../src/services/mercadopago.service.js';
+import { MercadoPagoGateway, PaymentLookupError, type Gateway, type Payment } from '../src/services/mercadopago.service.js';
 import { validSignature } from '../src/services/webhook-signature.js';
 const secret=randomBytes(32).toString('hex');
 const env={MP_ACCESS_TOKEN:`TEST-${randomBytes(32).toString('hex')}`,MP_WEBHOOK_SECRET:secret,BASE_URL:'https://api.example.test',FRONTEND_URL:'https://api.example.test',CORS_ORIGIN:'https://api.example.test',SUPPORT_AMOUNT:'1000.50'};
@@ -54,3 +54,83 @@ test('create-checkout rate limit',async t=>{const f=await fixture(t);for(let i=0
 test('signature known manifest, ts seconds and ms, missing/tampered fields',()=>{for(const ts of ['1792670400','1792670400000']){const h=createHmac('sha256',secret).update(`id:123;request-id:req;ts:${ts};`).digest('hex');assert(validSignature(`ts=${ts},v1=${h}`,'req','123',secret));assert(!validSignature(`ts=${ts},v1=${h}`,'req','124',secret));assert(!validSignature(`ts=${ts},v1=${h}`,'other','123',secret));assert(!validSignature(`ts=${ts},v1=${h},ts=${ts}`,'req','123',secret));}assert(!validSignature(undefined,'req','123',secret));});
 test('memory capacity and token hashing',()=>{const store=new MemoryStore(1000,1);const {operation,publicToken}=store.create(100,'ARS');assert.notEqual(operation.tokenHash,publicToken);assert.equal(store.byToken(publicToken)?.id,operation.id);assert.throws(()=>store.create(100,'ARS'));const expired=new MemoryStore(-1);const created=expired.create(100,'ARS');assert.equal(expired.byToken(created.publicToken),undefined);});
 test('REST adapter uses correct endpoint/auth and masks upstream secrets',async()=>{let seen='';const gateway=new MercadoPagoGateway('unit-secret',async(url,init)=>{seen=String(url);assert.equal((init?.headers as any).Authorization,'Bearer unit-secret');return new Response(JSON.stringify({id:900}),{status:200});});await gateway.getPayment('900');assert.equal(seen,'https://api.mercadopago.com/v1/payments/900');const failing=new MercadoPagoGateway('unit-secret',async()=>new Response('unit-secret',{status:401}));await assert.rejects(()=>failing.getPayment('900'),error=>error instanceof Error&&!error.message.includes('unit-secret'));});
+
+test('FIX: first observable webhook log precedes JSON parser failure',async t=>{
+ const f=await fixture(t);
+ const r=await f.request('/api/webhooks/mercadopago?data.id=900&type=payment&secret=do-not-log',{method:'POST',headers:{'Content-Type':'application/json','x-signature':'do-not-log'},body:'{broken'});
+ assert.equal(r.status,400);
+ assert.equal(f.logs[0]?.event,'webhook_request_received');
+ assert(f.logs.some(l=>l.event==='webhook_response_sent'));
+ assert(!f.logs.some(l=>l.event==='webhook_handler_entered'));
+ assert.equal(f.gateway.calls,0);
+ assert(!JSON.stringify(f.logs).includes('do-not-log'));
+ assert.equal(r.headers.get('x-eventdeck-webhook-fix'),'webhook-fix-1');
+ assert.match(r.headers.get('x-eventdeck-trace-id')!,/^[a-f0-9-]{36}$/);
+});
+test('FIX: signed JSON without Origin reaches exact POST route and logs ACK',async t=>{
+ const f=await fixture(t);await f.checkout();f.payment('approved');f.logs.length=0;
+ assert.equal((await f.webhook()).status,200);
+ const names=f.logs.map(l=>l.event);
+ for(const name of ['webhook_request_received','webhook_handler_entered','webhook_signature_valid','webhook_payment_lookup_started','webhook_payment_verified','VISUAL PACK ACCESS GRANTED','webhook_acknowledged'])assert(names.includes(name),name);
+ assert.equal(names[0],'webhook_request_received');
+ const traces=f.logs.map(l=>(l.fields as any)?.traceId).filter(Boolean);assert.equal(new Set(traces).size,1);
+});
+test('FIX: invalid signature is observable, 401 and never acknowledged',async t=>{
+ const f=await fixture(t);
+ const r=await f.webhook('ts=1792670400,v1='+'0'.repeat(64));assert.equal(r.status,401);
+ assert(f.logs.some(l=>l.event==='webhook_request_received'));
+ assert(f.logs.some(l=>l.event==='webhook_signature_invalid'));
+ assert(!f.logs.some(l=>l.event==='webhook_acknowledged'));assert.equal(f.gateway.calls,0);
+});
+test('FIX: authenticated missing payment is acknowledged, no access or grant',async t=>{
+ const f=await fixture(t);const {publicToken}=await f.checkout();
+ f.gateway.getPayment=async(id:string)=>{assert.equal(id,'123456');throw new PaymentLookupError(404);};
+ const ts='1792670400000';
+ const signature=createHmac('sha256',secret).update(`id:123456;request-id:test-request;ts:${ts};`).digest('hex');
+ assert.equal((await f.webhook(`ts=${ts},v1=${signature}`,{type:'payment',data:{id:'123456'}},'data.id=123456&type=payment')).status,200);
+ assert.deepEqual(await (await f.request('/api/support/status/'+publicToken)).json(),{status:'processing',accessGranted:false});
+ assert(f.logs.some(l=>l.event==='webhook_payment_lookup_failed'&&(l.fields as any).upstreamStatus===404));
+ assert(f.logs.some(l=>l.event==='webhook_acknowledged'));
+ assert(!f.logs.some(l=>l.event==='VISUAL PACK ACCESS GRANTED'));
+});
+test('FIX: auth/rate/provider/transport lookup failures remain retryable, not false ACKs',async t=>{
+ const f=await fixture(t);const {publicToken}=await f.checkout();
+ for(const status of [401,403,429,500,503,undefined]){
+  f.gateway.getPayment=async()=>{throw new PaymentLookupError(status);};
+  assert.equal((await f.webhook()).status,502);
+ }
+ assert(!f.logs.some(l=>l.event==='webhook_acknowledged'));
+ assert.equal((await (await f.request('/api/support/status/'+publicToken)).json()).accessGranted,false);
+});
+test('FIX: adapter distinguishes authenticated payment 404 from other errors, no raw body',async()=>{
+ for(const status of [404,401,403,429,500]){
+  const gateway=new MercadoPagoGateway('fixture',async()=>new Response('sensitive upstream body',{status}));
+  await assert.rejects(()=>gateway.getPayment('123456'),e=>e instanceof PaymentLookupError&&e.upstreamStatus===status&&!e.message.includes('sensitive'));
+ }
+ const broken=new MercadoPagoGateway('fixture',async()=>{throw new Error('sensitive transport');});
+ await assert.rejects(()=>broken.getPayment('123456'),e=>e instanceof PaymentLookupError&&e.upstreamStatus===undefined);
+});
+test('FIX: webhook ignores foreign Origin; CORS on frontend remains restrictive',async t=>{
+ const f=await fixture(t);
+ const r=await f.request('/api/webhooks/mercadopago?data.id=900&type=payment',{method:'POST',headers:{Origin:'https://foreign.example','Content-Type':'application/json'},body:'{}'});
+ assert.equal(r.status,401);assert.equal((await r.json() as any).error,'INVALID_SIGNATURE');
+ assert(f.logs.some(l=>l.event==='webhook_handler_entered'));
+ assert.equal((await f.request('/api/support/config',{headers:{Origin:'https://foreign.example'}})).status,403);
+});
+test('FIX: wrong method or suffix is observed but cannot process payment',async t=>{
+ const f=await fixture(t);
+ assert.equal((await f.request('/api/webhooks/mercadopago')).status,404);
+ assert.equal((await f.request('/api/webhooks/mercadopago-typo',{method:'POST'})).status,404);
+ assert.equal(f.logs.filter(l=>l.event==='webhook_request_received').length,2);
+ assert(!f.logs.some(l=>l.event==='webhook_handler_entered'));assert.equal(f.gateway.calls,0);
+});
+test('FIX: oversized payload and rate limiter still emit ingress and response logs',async t=>{
+ const f=await fixture(t);
+ assert.equal((await f.request('/api/webhooks/mercadopago',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:'a'.repeat(17000)})})).status,413);
+ for(let i=0;i<179;i++)await f.webhook('invalid');
+ f.logs.length=0;
+ assert.equal((await f.webhook('invalid')).status,429);
+ assert.equal(f.logs[0]?.event,'webhook_request_received');
+ assert(f.logs.some(l=>l.event==='webhook_response_sent'&&(l.fields as any).httpStatus===429));
+ assert(!f.logs.some(l=>l.event==='webhook_handler_entered'));
+});

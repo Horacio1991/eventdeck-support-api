@@ -6,8 +6,9 @@ import { AppError, unavailable } from './utils/errors.js';
 import { logger, type Logger } from './utils/logger.js';
 import { cors, errors, limiter } from './middleware/security.js';
 import { MemoryStore, type Store } from './services/store.js';
-import { MercadoPagoGateway, type Gateway } from './services/mercadopago.service.js';
+import { MercadoPagoGateway, PaymentLookupError, type Gateway } from './services/mercadopago.service.js';
 import { SupportService } from './services/support.service.js';
+import { webhookDiagnostics } from './middleware/webhook-diagnostics.js';
 import { validSignature } from './services/webhook-signature.js';
 const publicDir=fileURLToPath(new URL('../public/',import.meta.url));
 const tokenPattern=/^[a-f0-9]{64}$/;
@@ -15,24 +16,31 @@ export function createApp(config:Config, deps:{store?:Store;gateway?:Gateway;log
   const app=express();const log=deps.log||logger;
   const service=new SupportService(config,deps.store||new MemoryStore(),deps.gateway||new MercadoPagoGateway(config.accessToken),log);
   app.disable('x-powered-by');app.set('trust proxy',config.trustProxyHops);app.set('query parser','simple');
+  app.use('/api/webhooks',webhookDiagnostics(log));
   app.use(helmet({referrerPolicy:{policy:'no-referrer'},contentSecurityPolicy:{directives:{'default-src':["'self'"],'script-src':["'self'"],'style-src':["'self'"],'img-src':["'self'"],'connect-src':["'self'"],'object-src':["'none'"],'frame-ancestors':["'none'"],'form-action':["'self'"],'upgrade-insecure-requests':config.production?[]:null}}}));
   app.use((_req,res,next)=>{res.setHeader('Cache-Control','no-store');next();});
   app.get('/health',(_req,res)=>{res.json({status:'ok',service:'eventdeck-support-api'});});
   // Webhooks no usan CORS: autenticación por firma, nunca por Origin.
   app.post('/api/webhooks/mercadopago',limiter(180,60_000),express.json({limit:'16kb'}),async(req,res)=>{
-    log('webhook_received');
+    const requestLog=res.locals.webhookLog as Logger;
+    requestLog('webhook_handler_entered');
     if(!config.webhookSecret || !config.accessToken) throw unavailable();
     const id=req.query['data.id'];
     if(typeof id!=='string'|| !/^\d{1,20}$/.test(id) || !validSignature(req.get('x-signature'),req.get('x-request-id'),id,config.webhookSecret)) {
-      log('webhook_signature_invalid');throw new AppError(401,'INVALID_SIGNATURE','Notificación no autenticada.');
+      requestLog('webhook_signature_invalid');throw new AppError(401,'INVALID_SIGNATURE','Notificación no autenticada.');
     }
-    log('webhook_signature_valid',{paymentId:id});
+    requestLog('webhook_signature_valid',{paymentId:id});
     const type=req.query.type ?? req.body?.type;
     if(type!=='payment'){res.status(200).json({received:true});return;}
     if(req.body?.type && req.body.type!=='payment') throw new AppError(400,'INVALID_EVENT','Evento inconsistente.');
     if(req.body?.data?.id!==undefined && String(req.body.data.id)!==id) throw new AppError(400,'INVALID_EVENT','Evento inconsistente.');
-    // No se lee status/live_mode del body. Espera al GET autenticado; error => no ACK exitoso.
-    await service.verifyPayment(id);
+    // ACK de recepción no equivale a aprobación. Solo 404 del GET auténtico se reconoce sin acceso.
+    // No adivinar si un ID pertenece al simulador; 401/403/429/5xx/timeouts conservan reintentos.
+    try { await service.verifyPayment(id,requestLog); }
+    catch(error) {
+      if(!(error instanceof PaymentLookupError) || error.upstreamStatus!==404) throw error;
+      requestLog('webhook_payment_not_found_no_access',{paymentId:id,code:'MP_PAYMENT_NOT_FOUND'});
+    }
     res.status(200).json({received:true});
   });
   app.use('/api/support',cors(config.corsOrigin));

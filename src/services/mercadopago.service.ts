@@ -11,6 +11,12 @@ export interface Gateway {
   createPreference(body: Record<string,unknown>): Promise<Preference>;
   getPayment(id: string): Promise<Payment>;
 }
+// Solo describe errores del GET de payments; no conserva body/headers del proveedor.
+export class PaymentLookupError extends AppError {
+  constructor(public upstreamStatus?:number) {
+    super(502,upstreamStatus===404?'MP_PAYMENT_NOT_FOUND':'MP_PAYMENT_LOOKUP_FAILED','No se pudo verificar el pago.');
+  }
+}
 export class MercadoPagoGateway implements Gateway {
   constructor(private token: string, private fetcher: typeof fetch = fetch) {}
   private async request(path: string, body?: Record<string,unknown>): Promise<unknown> {
@@ -19,9 +25,13 @@ export class MercadoPagoGateway implements Gateway {
         method:body?'POST':'GET', headers:{Authorization:`Bearer ${this.token}`,'Content-Type':'application/json'},
         ...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(10_000),redirect:'error'
       });
+      if (!response.ok && !body) throw new PaymentLookupError(response.status);
       if (!response.ok) throw new AppError(502,'MP_API_ERROR','Mercado Pago no pudo completar la consulta. Intentá nuevamente.');
       return await response.json();
-    } catch { throw new AppError(502,'MP_API_ERROR','Mercado Pago no pudo completar la consulta. Intentá nuevamente.'); }
+    } catch(error) {
+      if(!body) throw error instanceof PaymentLookupError?error:new PaymentLookupError();
+      throw new AppError(502,'MP_API_ERROR','Mercado Pago no pudo completar la consulta. Intentá nuevamente.');
+    }
   }
   async createPreference(body: Record<string,unknown>) { return await this.request('/checkout/preferences',body) as Preference; }
   async getPayment(id: string) { return await this.request(`/v1/payments/${encodeURIComponent(id)}`) as Payment; }

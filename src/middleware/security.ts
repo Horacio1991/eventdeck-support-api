@@ -23,7 +23,8 @@ export function errors(log:Logger):ErrorRequestHandler {
     if(error instanceof AppError){status=error.status;code=error.code;message=error.safeMessage;}
     else if(error?.type==='entity.parse.failed'){status=400;code='INVALID_JSON';message='JSON inválido.';}
     else if(error?.type==='entity.too.large'){status=413;code='BODY_TOO_LARGE';message='Solicitud demasiado grande.';}
-    log('request_failed',{code});
+    const requestLog:Logger=res.locals.webhookLog || log;
+    requestLog('request_failed',{code,httpStatus:status});
     res.status(status).json({error:code,message});
   };
 }

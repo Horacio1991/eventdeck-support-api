@@ -1,5 +1,7 @@
 # eventdeck-support-api
 
+**FIX webhook-fix-1:** leer [FIX-WEBHOOK.md](FIX-WEBHOOK.md) para diagnóstico, nueva política de ACK y pasos de prueba.
+
 Backend **independiente y exclusivamente de prueba** para validar Mercado Pago Checkout Pro mediante Preferences API. No modifica EventDeck-Web-Hito9, la aplicación WPF ni implementa Hito 10. EventDeck continúa siendo gratuito. El monto aquí configurado no define un precio comercial definitivo.
 
 La aprobación produce solamente el estado y log `VISUAL PACK ACCESS GRANTED`. No hay Visual Pack, Google Drive, descarga, correo, usuarios, login ni entrega de archivos. No se ha desplegado este proyecto ni realizado pagos reales.
@@ -124,7 +126,7 @@ Después de validar la firma se consulta el pago por API y se comprueba:
 - date_last_updated es válida; no se aplican snapshots anteriores al ya guardado.
 - El estado es approved y no existe monto reembolsado para conceder acceso.
 
-Un pago ajeno se ignora sin acceso; discrepancias fallan cerradas. Un webhook válido no obtiene 200 hasta terminar la consulta/verificación; errores devuelven no-2xx para permitir reintentos. El timeout de API es 10 s, debajo de los 22 s documentados por Mercado Pago para responder. Un simulador con un ID ficticio puede validar conectividad/firma pero no genera un pago auténtico: un 502/404 aguas arriba no demuestra un pago aprobado. La prueba decisiva es un checkout TEST creado por este backend.
+Un pago ajeno se ignora sin acceso; discrepancias fallan cerradas. Un webhook válido no obtiene 200 hasta terminar la consulta/verificación; errores transitorios devuelven no-2xx para permitir reintentos. Excepción acotada del FIX: un GET autenticado de payment que responde 404 se reconoce con 200, sin modificar el estado ni conceder acceso. El timeout de API es 10 s, debajo de los 22 s documentados por Mercado Pago para responder. Un simulador con un ID ficticio puede validar conectividad/firma pero no genera un pago auténtico: un 404 aguas arriba ahora produce ACK 200 sin acceso; otros errores de consulta siguen devolviendo 502. Ninguno demuestra un pago aprobado. La prueba decisiva es un checkout TEST creado por este backend.
 
 ## Idempotencia, memoria y refunds
 
@@ -142,7 +144,7 @@ CORS permite un origen exacto; sin wildcard ni cookies. Solicitudes sin Origin, 
 
 Helmet aplica CSP self, bloqueo de framing y demás headers; sin scripts inline/terceros, no-referrer y no-store. Body máximo 1 KB para checkout y 16 KB para webhook. Errores públicos seguros sin stack ni respuesta cruda del proveedor. El token y secret nunca se envían al frontend ni se registran.
 
-Logs JSON: checkout_creation_started, preference_created, webhook_received, webhook_signature_valid/invalid, payment_query, payment_verified, payment_mismatch, payment_unrelated y VISUAL PACK ACCESS GRANTED. El logger acepta solo IDs, estado y códigos; operationId es external_reference. No registra cuerpos, headers, tokens públicos, credenciales ni datos personales de Mercado Pago. Los logs del hosting pueden tener otras reglas: no habilites captura de cuerpos/headers ni URLs sensibles.
+Logs JSON: checkout_creation_started, preference_created, webhook_received, webhook_signature_valid/invalid, webhook_payment_lookup_started, webhook_payment_lookup_failed, webhook_payment_verified, payment_mismatch, payment_unrelated y VISUAL PACK ACCESS GRANTED. El logger acepta solo IDs, estado y códigos; operationId es external_reference. No registra cuerpos, headers, tokens públicos, credenciales ni datos personales de Mercado Pago. Los logs del hosting pueden tener otras reglas: no habilites captura de cuerpos/headers ni URLs sensibles.
 
 ## Despliegue manual en Render
 
@@ -178,7 +180,7 @@ Usá exclusivamente las cuentas y tarjetas provistas por Mercado Pago Developers
 2. Presioná APOYAR EVENTDECK. Confirmá que se abre el Checkout Pro sandbox oficial.
 3. Iniciá sesión con el comprador de prueba e ingresá datos de tarjeta **solo en Mercado Pago**. Usá los datos actuales del panel/documentación oficial, no tarjetas reales.
 4. Para aprobación utilizá el escenario documentado APRO. Para rechazo, OTHE. Para pendiente, CONT si el método de prueba elegido lo admite, o un medio offline de prueba admitido por el panel. No todos los métodos simulan todos los estados; no fuerces la aprobación cambiando URLs ni la firma.
-5. Al retornar, la página puede decir PROCESANDO PAGO hasta que llegue el webhook. Revisá logs: firma válida → payment_query → payment_verified → VISUAL PACK ACCESS GRANTED solo en approved.
+5. Al retornar, la página puede decir PROCESANDO PAGO hasta que llegue el webhook. Revisá logs: firma válida → webhook_payment_lookup_started → webhook_payment_verified → VISUAL PACK ACCESS GRANTED solo en approved.
 6. Confirmá que status retorna accessGranted true únicamente para approved. Rechazado/pendiente no deben registrar concesión.
 7. Reenvío del mismo webhook desde herramientas de Mercado Pago, si están disponibles: puede volver a verificar pero no genera un segundo log de concesión.
 8. Probá una URL success con parámetros que digan approved en un intento pendiente: debe seguir sin acceso. No compartas el token del enlace.

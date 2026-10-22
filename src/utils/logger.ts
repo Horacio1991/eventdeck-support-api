@@ -1,7 +1,7 @@
 // Lista cerrada de campos. No aceptar requests, errores crudos o respuestas de MP.
-export type LogFields = { operationId?: string; paymentId?: string; preferenceId?: string; status?: string; code?: string };
+export type LogFields = { operationId?: string; paymentId?: string; preferenceId?: string; status?: string; code?: string; traceId?: string; method?: string; path?: string; signaturePresent?: boolean; requestIdPresent?: boolean; routeMatched?: boolean; queryIdValid?: boolean; eventType?: string; contentType?: string; httpStatus?: number; upstreamStatus?: number; durationMs?: number };
 export type Logger = (event: string, fields?: LogFields) => void;
 export const logger: Logger = (event, fields = {}) => {
-  const { operationId, paymentId, preferenceId, status, code } = fields;
-  console.log(JSON.stringify({ time: new Date().toISOString(), event, operationId, paymentId, preferenceId, status, code }));
+  const { operationId, paymentId, preferenceId, status, code, traceId, method, path, signaturePresent, requestIdPresent, routeMatched, queryIdValid, eventType, contentType, httpStatus, upstreamStatus, durationMs } = fields;
+  console.log(JSON.stringify({ time: new Date().toISOString(), event, operationId, paymentId, preferenceId, status, code, traceId, method, path, signaturePresent, requestIdPresent, routeMatched, queryIdValid, eventType, contentType, httpStatus, upstreamStatus, durationMs }));
 };
