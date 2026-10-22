@@ -1,5 +1,7 @@
 # eventdeck-support-api
 
+**FIX2 vigente:** leer [FIX-WEBHOOK-2.md](FIX-WEBHOOK-2.md). Diagnóstico preciso de firma; no se afirma resuelto el rechazo real sin una nueva comprobación.
+
 **FIX webhook-fix-1:** leer [FIX-WEBHOOK.md](FIX-WEBHOOK.md) para diagnóstico, nueva política de ACK y pasos de prueba.
 
 Backend **independiente y exclusivamente de prueba** para validar Mercado Pago Checkout Pro mediante Preferences API. No modifica EventDeck-Web-Hito9, la aplicación WPF ni implementa Hito 10. EventDeck continúa siendo gratuito. El monto aquí configurado no define un precio comercial definitivo.
@@ -109,10 +111,10 @@ Configurar notificaciones **Pagos / payment** de Checkout Pro Preferences. No us
 El endpoint toma `data.id` del query (un único ID numérico), `x-request-id` y `ts`/`v1` de `x-signature`. Construye el manifiesto oficial:
 
 ```text
-id:<data.id en minúsculas>;request-id:<x-request-id>;ts:<ts>;
+id:<data.id exacto del query>;request-id:<x-request-id>;ts:<ts>;
 ```
 
-Calcula HMAC-SHA256 con MP_WEBHOOK_SECRET y compara el digest hexadecimal con `v1` mediante `timingSafeEqual`. Exige todos los campos que usa este flujo, rechaza duplicados y formato inválido. Conserva el timestamp literal para calcular la firma; admite segundos o milisegundos. La firma **no autentica todo el JSON**, por eso el body nunca decide el estado del pago. Si contiene data.id, debe coincidir con el query.
+Calcula HMAC-SHA256 con MP_WEBHOOK_SECRET y compara el digest hexadecimal con `v1` mediante `timingSafeEqual`. Exige todos los campos que usa este flujo, rechaza duplicados y formato inválido. Preserva el case de data.id según las guías actuales del SDK oficial, sin fallback al body. Conserva el timestamp literal para calcular la firma; admite segundos o milisegundos. La firma **no autentica todo el JSON**, por eso el body nunca decide el estado del pago. Si contiene data.id, debe coincidir con el query.
 
 No hay ventana de caducidad por reloj en esta prueba: se toleran reintentos diferidos del proveedor. Una firma repetida solo provoca una nueva consulta auténtica al pago; no puede duplicar la concesión. Existen límites de solicitudes y concurrencia. Para producción se deberá revisar una política de replay compatible con reintentos, persistencia y cola.
 

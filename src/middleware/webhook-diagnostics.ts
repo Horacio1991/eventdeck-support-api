@@ -1,3 +1,4 @@
+import { SIGNATURE_FIX } from '../services/webhook-signature.js';
 import { randomUUID } from 'node:crypto';
 import type { RequestHandler } from 'express';
 import type { Logger } from '../utils/logger.js';
@@ -9,6 +10,7 @@ export function webhookDiagnostics(log:Logger):RequestHandler {
     const requestLog:Logger=(event,fields)=>log(event,{...fields,traceId});
     res.locals.webhookLog=requestLog;
     res.setHeader('X-EventDeck-Webhook-Fix',WEBHOOK_FIX);
+    res.setHeader('X-EventDeck-Signature-Fix',SIGNATURE_FIX);
     res.setHeader('X-EventDeck-Trace-Id',traceId);
     const started=Date.now();
     requestLog('webhook_request_received',{

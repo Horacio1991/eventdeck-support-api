@@ -9,7 +9,8 @@ import { MemoryStore, type Store } from './services/store.js';
 import { MercadoPagoGateway, PaymentLookupError, type Gateway } from './services/mercadopago.service.js';
 import { SupportService } from './services/support.service.js';
 import { webhookDiagnostics } from './middleware/webhook-diagnostics.js';
-import { validSignature } from './services/webhook-signature.js';
+import { inspectSignature } from './services/webhook-signature.js';
+import { webhookInput } from './services/webhook-input.js';
 const publicDir=fileURLToPath(new URL('../public/',import.meta.url));
 const tokenPattern=/^[a-f0-9]{64}$/;
 export function createApp(config:Config, deps:{store?:Store;gateway?:Gateway;log?:Logger}={}) {
@@ -25,13 +26,17 @@ export function createApp(config:Config, deps:{store?:Store;gateway?:Gateway;log
     const requestLog=res.locals.webhookLog as Logger;
     requestLog('webhook_handler_entered');
     if(!config.webhookSecret || !config.accessToken) throw unavailable();
-    const id=req.query['data.id'];
-    if(typeof id!=='string'|| !/^\d{1,20}$/.test(id) || !validSignature(req.get('x-signature'),req.get('x-request-id'),id,config.webhookSecret)) {
-      requestLog('webhook_signature_invalid');throw new AppError(401,'INVALID_SIGNATURE','Notificación no autenticada.');
+    const input=webhookInput(req.query,req.body);
+    const signature=inspectSignature(req.get('x-signature'),req.get('x-request-id'),input.dataId,config.webhookSecret);
+    requestLog('webhook_signature_components',{...input.diagnostics,...signature.diagnostics});
+    if(!input.queryIdValid || !signature.valid) {
+      const code=!input.queryIdValid?(input.dataId===undefined?'MISSING_OR_AMBIGUOUS_QUERY_ID':'INVALID_PAYMENT_ID'):signature.diagnostics.signatureCheck;
+      requestLog('webhook_signature_invalid',{code});throw new AppError(401,'INVALID_SIGNATURE','Notificación no autenticada.');
     }
+    const id=input.dataId!;
     requestLog('webhook_signature_valid',{paymentId:id});
     const type=req.query.type ?? req.body?.type;
-    if(type!=='payment'){res.status(200).json({received:true});return;}
+    if(type!=='payment'){requestLog('webhook_event_ignored',{code:'NOT_PAYMENT'});res.status(200).json({received:true});return;}
     if(req.body?.type && req.body.type!=='payment') throw new AppError(400,'INVALID_EVENT','Evento inconsistente.');
     if(req.body?.data?.id!==undefined && String(req.body.data.id)!==id) throw new AppError(400,'INVALID_EVENT','Evento inconsistente.');
     // ACK de recepción no equivale a aprobación. Solo 404 del GET auténtico se reconoce sin acceso.

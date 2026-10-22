@@ -1,18 +1,17 @@
-# Verificación — webhook-fix-1 — 22/10/2026
+# Verificación — webhook-fix-2 — 22/10/2026
 
-Base exacta: eventdeck-support-api(3).zip.
+Base exacta: eventdeck-support-api-webhook-fix(2).zip.
 
 - npm run build: OK.
 - npm run typecheck: OK.
-- npm test: 28 tests, 28 aprobados, 0 fallos.
-- 19 tests originales conservados íntegramente; solo se extendió su import para los 9 nuevos tests.
-- Smoke HTTP con JavaScript compilado: health 200, webhook sin firma 401, headers del FIX y log temprano comprobados.
-- Comprobación sobre despliegue ANTERIOR al FIX: health 200; POST sin firma en ruta exacta 401 INVALID_SIGNATURE (22/10/2026, aproximadamente 12:31 Argentina). No se solicitó ni utilizó ninguna credencial.
-- Comparación binaria con ZIP recibido: HMAC, grantVisualPackAccess, store, configuración, .env.example, frontend completo, package.json y lockfile sin modificaciones.
-- Contenido de preferenceBody y sandboxUrl idéntico al original.
-- No hay dependencias nuevas, .env, node_modules o credenciales reales en el ZIP.
-- Warning ambiental de npm: http-proxy desconocido. No afecta build/tests ni es un cambio del proyecto.
+- npm test: 44 aprobados, 0 fallos (28 originales + 16 nuevos).
+- No hay dependencias nuevas, credenciales reales, cambios de infraestructura ni despliegue.
+- No se contactó el endpoint de Render para repetir diagnósticos que ya están comprobados en los logs del usuario.
+- Los tests sintéticos de firma no son una reproducción criptográfica del header real rechazado: los logs recibidos no contienen esos componentes.
+- La corrección de case preservation no explica el ID numérico rechazado. Se agregan códigos que distinguen rechazo de formato de HMAC_MISMATCH y una clasificación segura de notificaciones. Sigue pendiente confirmar la causa exacta con la nueva evidencia del entorno real.
+- Advertencia ambiental de npm: http-proxy desconocido; no impide validaciones ni forma parte del proyecto.
 
-El FIX no fue desplegado. No se hicieron pagos, ni checkout real ni simulado contra Mercado Pago. Las verificaciones autenticadas son mocks locales. No hay acceso a los runtime logs privados de Render ni a los intentos de entrega de Mercado Pago. La causa de ausencia total de logs en esos intentos sigue pendiente de confirmación mediante la instrumentación y el procedimiento de FIX-WEBHOOK.md.
+Ver FIX-WEBHOOK-2.md para causa demostrada/límites, fuentes oficiales, archivos modificados y procedimiento de prueba. No hay promesa de aprobación ni relajación de las condiciones de acceso.
 
-Las dos correcciones comprobables son: log de ingreso anterior a parser/limiter y clasificación de errores de consulta para reconocer exclusivamente un 404 autenticado sin conceder acceso. Firma, condiciones de approved e idempotencia permanecen intactas.
+- Comparación binaria: 15 archivos protegidos idénticos al ZIP base, incluido el archivo de los 28 tests originales.
+- Smoke del servidor compilado: 401 sin firma, header FIX2 y diagnóstico MISSING_SIGNATURE correctos.
