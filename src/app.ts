@@ -27,8 +27,13 @@ export function createApp(config:Config, deps:{store?:Store;gateway?:Gateway;log
     requestLog('webhook_handler_entered');
     if(!config.webhookSecret || !config.accessToken) throw unavailable();
     const input=webhookInput(req.query,req.body);
-    const signature=inspectSignature(req.get('x-signature'),req.get('x-request-id'),input.dataId,config.webhookSecret);
+    const signature=inspectSignature(req.get('x-signature'),req.get('x-request-id'),input.dataId,config.webhookSecret,config.webhookProductionDiagnosticSecret);
     requestLog('webhook_signature_components',{...input.diagnostics,...signature.diagnostics});
+    if(signature.dualDiagnostic) requestLog('webhook_dual_secret_diagnostic',{
+      ...signature.dualDiagnostic,paymentId:input.queryIdValid?input.dataId:undefined,
+      notificationShape:input.diagnostics.notificationShape,
+      manifestVariant:signature.diagnostics.manifestVariant,manifestLength:signature.diagnostics.manifestLength
+    });
     if(!input.queryIdValid || !signature.valid) {
       const code=!input.queryIdValid?(input.dataId===undefined?'MISSING_OR_AMBIGUOUS_QUERY_ID':'INVALID_PAYMENT_ID'):signature.diagnostics.signatureCheck;
       requestLog('webhook_signature_invalid',{code});throw new AppError(401,'INVALID_SIGNATURE','Notificación no autenticada.');

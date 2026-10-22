@@ -2,7 +2,7 @@ import { SIGNATURE_FIX } from '../services/webhook-signature.js';
 import { randomUUID } from 'node:crypto';
 import type { RequestHandler } from 'express';
 import type { Logger } from '../utils/logger.js';
-export const WEBHOOK_FIX = 'webhook-fix-1';
+export const WEBHOOK_FIX = SIGNATURE_FIX;
 // Montar antes de Helmet, parser, rate limit y CORS. Nunca registrar URL/query completos.
 export function webhookDiagnostics(log:Logger):RequestHandler {
   return (req,res,next)=>{
@@ -16,7 +16,7 @@ export function webhookDiagnostics(log:Logger):RequestHandler {
     requestLog('webhook_request_received',{
       method:req.method,path:'/api/webhooks',
       signaturePresent:Boolean(req.get('x-signature')),requestIdPresent:Boolean(req.get('x-request-id')),
-      code:WEBHOOK_FIX
+      code:SIGNATURE_FIX
     });
     // La primera línea ya se emitió incluso si falla la lectura posterior del query.
     const id=req.query['data.id'];

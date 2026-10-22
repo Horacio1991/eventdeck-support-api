@@ -1,16 +1,16 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-export const SIGNATURE_FIX = 'webhook-fix-2';
+export const SIGNATURE_FIX = 'webhook-hmac-dual-diagnostic';
 export type SignatureDiagnostics = {
   timestampPresent:boolean; signatureVersionPresent:boolean; timestampLength:number;
   signatureLength:number; requestIdPresent:boolean; requestIdLength:number;
   manifestLength:number; manifestVariant:string; signatureCheck:string;
 };
-// SDK oficial actual: preservar los valores; sin lowercase, trim ni Number().
+// Política existente: preservar valores aceptados, sin lowercase, trim ni Number().
 // Los pares ausentes se omiten en el constructor general; el endpoint Payments los exige.
 export function buildManifest(dataId:string|undefined,requestId:string|undefined,ts:string|undefined):string {
   return (dataId ? `id:${dataId};` : '') + (requestId ? `request-id:${requestId};` : '') + (ts ? `ts:${ts};` : '');
 }
-export function inspectSignature(signature:string|undefined,requestId:string|undefined,dataId:string|undefined,secret:string):{valid:boolean;diagnostics:SignatureDiagnostics} {
+export function inspectSignature(signature:string|undefined,requestId:string|undefined,dataId:string|undefined,secret:string,productionDiagnosticSecret?:string):{valid:boolean;diagnostics:SignatureDiagnostics;dualDiagnostic?:{testSecretConfigured:boolean;productionSecretConfigured:boolean;testSecretMatch:boolean;productionSecretMatch:boolean|null;sameManifestUsed:boolean}} {
   const d:SignatureDiagnostics={timestampPresent:false,signatureVersionPresent:false,timestampLength:0,
     signatureLength:signature?.length||0,requestIdPresent:Boolean(requestId),requestIdLength:requestId?.length||0,
     manifestLength:0,manifestVariant:'not-built',signatureCheck:'UNTESTED'};
@@ -38,10 +38,13 @@ export function inspectSignature(signature:string|undefined,requestId:string|und
   if(!v1 || !/^[a-fA-F0-9]{64}$/.test(v1))return fail('DIGEST_FORMAT');
   const manifest=buildManifest(dataId,requestId,ts);
   d.manifestVariant='query-id_request-id_ts_exact-v2';d.manifestLength=Buffer.byteLength(manifest,'utf8');
-  const expected=createHmac('sha256',secret).update(manifest).digest();
-  const valid=timingSafeEqual(expected,Buffer.from(v1,'hex'));
+  const received=Buffer.from(v1,'hex');
+  const matches=(key:string)=>timingSafeEqual(createHmac('sha256',key).update(manifest,'utf8').digest(),received);
+  const valid=matches(secret);
+  // Telemetría únicamente. NUNCA participa en valid ni en la autorización.
+  const productionSecretMatch=productionDiagnosticSecret ? matches(productionDiagnosticSecret) : null;
   d.signatureCheck=valid?'MATCH':'HMAC_MISMATCH';
-  return {valid,diagnostics:d};
+  return {valid,diagnostics:d,dualDiagnostic:{testSecretConfigured:Boolean(secret),productionSecretConfigured:Boolean(productionDiagnosticSecret),testSecretMatch:valid,productionSecretMatch,sameManifestUsed:true}};
 }
 // Interfaz conservada para los tests anteriores. Sin fallback a body ni variantes de manifest.
 export function validSignature(signature:string|undefined,requestId:string|undefined,dataId:string,secret:string):boolean {
