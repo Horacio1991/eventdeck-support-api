@@ -1,6 +1,8 @@
 # eventdeck-support-api
 
-**Estado actual: Hito 10 — infraestructura del Visual Pack.** Leer [HITO-10-VISUAL-PACK.md](HITO-10-VISUAL-PACK.md) para endpoints, política de tokens, limitaciones y verificación. El diagnóstico vigente sigue siendo `webhook-raw-url-diagnostic`; ticket WCS-55735 pendiente, sin cambios a HMAC.
+**Estado actual: Hito 11 — adaptador Cloudflare R2.** Leer [HITO-11-R2-STORAGE.md](HITO-11-R2-STORAGE.md). Storage `disabled` por defecto; R2 es opt-in con validación al iniciar. No se subió el pack ni se configuró infraestructura. El documento Hito 10 describe la autorización conservada.
+
+**Base: Hito 10 — infraestructura del Visual Pack.** Leer [HITO-10-VISUAL-PACK.md](HITO-10-VISUAL-PACK.md) para endpoints, política de tokens, limitaciones y verificación. El diagnóstico vigente sigue siendo `webhook-raw-url-diagnostic`; ticket WCS-55735 pendiente, sin cambios a HMAC.
 
 **FIX2 vigente:** leer [FIX-WEBHOOK-2.md](FIX-WEBHOOK-2.md). Diagnóstico preciso de firma; no se afirma resuelto el rechazo real sin una nueva comprobación.
 

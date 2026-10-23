@@ -13,14 +13,15 @@ import { webhookDiagnostics } from './middleware/webhook-diagnostics.js';
 import { inspectSignature } from './services/webhook-signature.js';
 import { webhookInput } from './services/webhook-input.js';
 import { MemoryEntitlementRepository, MemoryDownloadTokenRepository, type EntitlementRepository, type DownloadTokenRepository } from './benefits/repositories.js';
-import { UnconfiguredVisualPackStorage, type VisualPackStorage } from './benefits/storage.js';
+import { type VisualPackStorage } from './benefits/storage.js';
+import { createVisualPackStorage } from './benefits/storage-factory.js';
 import { VisualPackService } from './benefits/visual-pack.service.js';
 const publicDir=fileURLToPath(new URL('../public/',import.meta.url));
 const tokenPattern=/^[a-f0-9]{64}$/;
 export function createApp(config:Config, deps:{store?:Store;gateway?:Gateway;log?:Logger;entitlements?:EntitlementRepository;downloadTokens?:DownloadTokenRepository;storage?:VisualPackStorage}={}) {
   const app=express();const log=deps.log||logger;
   const store=deps.store||new MemoryStore();
-  const benefits=new VisualPackService(store,deps.entitlements||new MemoryEntitlementRepository(),deps.downloadTokens||new MemoryDownloadTokenRepository(),deps.storage||new UnconfiguredVisualPackStorage());
+  const benefits=new VisualPackService(store,deps.entitlements||new MemoryEntitlementRepository(),deps.downloadTokens||new MemoryDownloadTokenRepository(),deps.storage||createVisualPackStorage(config.storage));
   const service=new SupportService(config,store,deps.gateway||new MercadoPagoGateway(config.accessToken),log,benefits);
   app.disable('x-powered-by');app.set('trust proxy',config.trustProxyHops);app.set('query parser','simple');
   app.use('/api/webhooks',webhookDiagnostics(log,config.webhookRawDiagnostic));
@@ -83,6 +84,7 @@ export function createApp(config:Config, deps:{store?:Store;gateway?:Gateway;log
   // HEAD must not implicitly run GET and consume a bearer token.
   app.head('/api/downloads/:token',(_req,res)=>{res.setHeader('Allow','GET');res.status(405).end();});
   app.get('/api/downloads/:token',limiter(60,60_000),async(req,res)=>{
+    if(Object.keys(req.query).length) throw new AppError(400,'INVALID_INPUT','La descarga solo admite su token, sin parámetros adicionales.');
     const url=await benefits.resolve(String(req.params.token));
     res.status(302).setHeader('Location',url).end(); // No fetch, proxy or file stream.
   });

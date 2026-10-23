@@ -1,4 +1,6 @@
+import { loadStorageConfig, type StorageConfig } from './storage-env.js';
 export interface Config {
+  storage: StorageConfig;
   port: number; production: boolean; accessToken: string; webhookSecret: string;
   webhookProductionDiagnosticSecret?: string; webhookRawDiagnostic?: boolean;
   baseUrl: string; frontendUrl: string; corsOrigin: string; amountCents: number | null;
@@ -38,7 +40,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const frontendUrl = origin(env.FRONTEND_URL || baseUrl, 'FRONTEND_URL', production);
   const corsOrigin = origin(env.CORS_ORIGIN || frontendUrl, 'CORS_ORIGIN', production);
   if (frontendUrl && corsOrigin && frontendUrl !== corsOrigin) throw new Error('CORS_ORIGIN debe coincidir con FRONTEND_URL en esta prueba');
-  return {webhookRawDiagnostic:env.MP_WEBHOOK_RAW_DIAGNOSTIC==='true', webhookProductionDiagnosticSecret: (env.MP_WEBHOOK_SECRET_PRODUCTION_DIAGNOSTIC || '').trim(), port, production, accessToken, webhookSecret: (env.MP_WEBHOOK_SECRET || '').trim(), baseUrl, frontendUrl, corsOrigin, amountCents, currency:'ARS', trustProxyHops};
+  return {storage:loadStorageConfig(env), webhookRawDiagnostic:env.MP_WEBHOOK_RAW_DIAGNOSTIC==='true', webhookProductionDiagnosticSecret: (env.MP_WEBHOOK_SECRET_PRODUCTION_DIAGNOSTIC || '').trim(), port, production, accessToken, webhookSecret: (env.MP_WEBHOOK_SECRET || '').trim(), baseUrl, frontendUrl, corsOrigin, amountCents, currency:'ARS', trustProxyHops};
 }
 export function ready(c: Config): boolean {
   return Boolean(c.accessToken && c.webhookSecret && c.amountCents && c.baseUrl.startsWith('https://') && c.frontendUrl.startsWith('https://') && c.corsOrigin);
