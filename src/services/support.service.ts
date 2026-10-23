@@ -4,10 +4,11 @@ import type { Logger } from '../utils/logger.js';
 import { PaymentLookupError, type Gateway, preferenceBody, sandboxUrl } from './mercadopago.service.js';
 import { type Store, type PublicStatus, publicState } from './store.js';
 import { grantVisualPackAccess } from './access.service.js';
+import type { VisualPackService } from '../benefits/visual-pack.service.js';
 const statuses: Record<string,PublicStatus> = {approved:'approved',pending:'pending',in_process:'pending',authorized:'pending',in_mediation:'not_approved',rejected:'rejected',cancelled:'cancelled',refunded:'refunded',charged_back:'charged_back'};
 export class SupportService {
   private running = new Map<string,Promise<void>>();
-  constructor(private config:Config, private store:Store, private gateway:Gateway, private log:Logger) {}
+  constructor(private config:Config, private store:Store, private gateway:Gateway, private log:Logger, private benefits?:VisualPackService) {}
   async create() {
     if(!ready(this.config)) throw unavailable();
     const {operation:op,publicToken}=this.store.create(this.config.amountCents!,this.config.currency);
@@ -55,6 +56,6 @@ export class SupportService {
     op.payments.set(id,{id,status,updatedAt:timestamp,verifiedAt:new Date().toISOString()});this.store.save(op);
     log('webhook_payment_verified',{operationId:op.id,paymentId:id,status});
     if(status==='approved') grantVisualPackAccess(this.store,op,id,log);
-    // Refunded/cancelled/charged_back => publicState no concede; futura entrega real requiere revocación.
+    this.benefits?.syncVerifiedOperation(op.id,id);
   }
 }

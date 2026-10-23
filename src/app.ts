@@ -12,11 +12,16 @@ import { SupportService } from './services/support.service.js';
 import { webhookDiagnostics } from './middleware/webhook-diagnostics.js';
 import { inspectSignature } from './services/webhook-signature.js';
 import { webhookInput } from './services/webhook-input.js';
+import { MemoryEntitlementRepository, MemoryDownloadTokenRepository, type EntitlementRepository, type DownloadTokenRepository } from './benefits/repositories.js';
+import { UnconfiguredVisualPackStorage, type VisualPackStorage } from './benefits/storage.js';
+import { VisualPackService } from './benefits/visual-pack.service.js';
 const publicDir=fileURLToPath(new URL('../public/',import.meta.url));
 const tokenPattern=/^[a-f0-9]{64}$/;
-export function createApp(config:Config, deps:{store?:Store;gateway?:Gateway;log?:Logger}={}) {
+export function createApp(config:Config, deps:{store?:Store;gateway?:Gateway;log?:Logger;entitlements?:EntitlementRepository;downloadTokens?:DownloadTokenRepository;storage?:VisualPackStorage}={}) {
   const app=express();const log=deps.log||logger;
-  const service=new SupportService(config,deps.store||new MemoryStore(),deps.gateway||new MercadoPagoGateway(config.accessToken),log);
+  const store=deps.store||new MemoryStore();
+  const benefits=new VisualPackService(store,deps.entitlements||new MemoryEntitlementRepository(),deps.downloadTokens||new MemoryDownloadTokenRepository(),deps.storage||new UnconfiguredVisualPackStorage());
+  const service=new SupportService(config,store,deps.gateway||new MercadoPagoGateway(config.accessToken),log,benefits);
   app.disable('x-powered-by');app.set('trust proxy',config.trustProxyHops);app.set('query parser','simple');
   app.use('/api/webhooks',webhookDiagnostics(log,config.webhookRawDiagnostic));
   app.use(helmet({referrerPolicy:{policy:'no-referrer'},contentSecurityPolicy:{directives:{'default-src':["'self'"],'script-src':["'self'"],'style-src':["'self'"],'img-src':["'self'"],'connect-src':["'self'"],'object-src':["'none'"],'frame-ancestors':["'none'"],'form-action':["'self'"],'upgrade-insecure-requests':config.production?[]:null}}}));
@@ -67,7 +72,19 @@ export function createApp(config:Config, deps:{store?:Store;gateway?:Gateway;log
   app.get('/api/support/status/:publicToken',limiter(90,60_000),(req,res)=>{
     const token=req.params.publicToken;
     if(typeof token!=='string'||!tokenPattern.test(token)) throw new AppError(404,'OPERATION_NOT_FOUND','Operación inexistente o vencida.');
-    res.json(service.status(token));
+    const status=service.status(token);
+    res.json(req.query.include==='benefit'?{...status,benefit:benefits.status(token)}:status);
+  });
+  app.post('/api/support/download-token/:publicToken',limiter(10,15*60_000),express.json({limit:'1kb'}),(req,res)=>{
+    if(!req.is('application/json')) throw new AppError(415,'JSON_REQUIRED','Enviá un objeto JSON vacío.');
+    if(!req.body||Array.isArray(req.body)||typeof req.body!=='object'||Object.keys(req.body).length) throw new AppError(400,'INVALID_INPUT','Solo se admite un objeto JSON vacío.');
+    res.status(201).json(benefits.issue(String(req.params.publicToken)));
+  });
+  // HEAD must not implicitly run GET and consume a bearer token.
+  app.head('/api/downloads/:token',(_req,res)=>{res.setHeader('Allow','GET');res.status(405).end();});
+  app.get('/api/downloads/:token',limiter(60,60_000),async(req,res)=>{
+    const url=await benefits.resolve(String(req.params.token));
+    res.status(302).setHeader('Location',url).end(); // No fetch, proxy or file stream.
   });
   app.get('/support/:outcome/:publicToken',(req,res,next)=>{
     if(!['success','pending','failure'].includes(String(req.params.outcome)) || !tokenPattern.test(String(req.params.publicToken))) return next(new AppError(404,'NOT_FOUND','Página no encontrada.'));

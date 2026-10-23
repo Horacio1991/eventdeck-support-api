@@ -1,12 +1,14 @@
 # eventdeck-support-api
 
+**Estado actual: Hito 10 — infraestructura del Visual Pack.** Leer [HITO-10-VISUAL-PACK.md](HITO-10-VISUAL-PACK.md) para endpoints, política de tokens, limitaciones y verificación. El diagnóstico vigente sigue siendo `webhook-raw-url-diagnostic`; ticket WCS-55735 pendiente, sin cambios a HMAC.
+
 **FIX2 vigente:** leer [FIX-WEBHOOK-2.md](FIX-WEBHOOK-2.md). Diagnóstico preciso de firma; no se afirma resuelto el rechazo real sin una nueva comprobación.
 
 **FIX webhook-fix-1:** leer [FIX-WEBHOOK.md](FIX-WEBHOOK.md) para diagnóstico, nueva política de ACK y pasos de prueba.
 
-Backend **independiente y exclusivamente de prueba** para validar Mercado Pago Checkout Pro mediante Preferences API. No modifica EventDeck-Web-Hito9, la aplicación WPF ni implementa Hito 10. EventDeck continúa siendo gratuito. El monto aquí configurado no define un precio comercial definitivo.
+Backend **independiente y exclusivamente de prueba** para validar Mercado Pago Checkout Pro mediante Preferences API. No modifica EventDeck-Web-Hito9 ni la aplicación WPF. EventDeck continúa siendo gratuito. El monto aquí configurado no define un precio comercial definitivo.
 
-La aprobación produce solamente el estado y log `VISUAL PACK ACCESS GRANTED`. No hay Visual Pack, Google Drive, descarga, correo, usuarios, login ni entrega de archivos. No se ha desplegado este proyecto ni realizado pagos reales.
+La aprobación verificada conserva el estado y log `VISUAL PACK ACCESS GRANTED` y ahora crea un entitlement idempotente. Existe infraestructura de autorización de descarga, pero el storage queda sin configurar: no se entrega el archivo real. No hay Google Drive, correo, usuarios ni login. Esta actualización no fue desplegada ni realizó pagos.
 
 ## Arquitectura y requisitos
 

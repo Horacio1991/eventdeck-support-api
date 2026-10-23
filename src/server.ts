@@ -5,7 +5,8 @@ import { logger } from './utils/logger.js';
 try {
   const config=loadConfig();
   const server=createApp(config).listen(config.port,'0.0.0.0',()=>{
-    logger('server_started',{code:SIGNATURE_FIX});
+    logger('server_started',{code:'hito10-visual-pack-entitlement'});
+    logger('webhook_diagnostics_version',{code:SIGNATURE_FIX});
     if(!ready(config)) logger('checkout_disabled',{code:'MISSING_TEST_CONFIGURATION'});
   });
   server.requestTimeout=15_000;server.headersTimeout=12_000;
